@@ -1,4 +1,4 @@
-const CACHE_NAME = 'festi-v1';
+const CACHE_NAME = 'festi-v2';
 const BASE_PATH = '/festi/';
 
 const urlsToCache = [
