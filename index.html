@@ -1873,6 +1873,31 @@ function abrirModal(f, esBusquedaTemporal){
         guardarArtistasLocal(f.id, finalLista);
         estadoEl.style.color = '#1e5a3e';
         estadoEl.textContent = '✅ Guardado en este dispositivo.';
+        // ====================================================
+      // AQUÍ ESTÁ EL CAMBIO: mostrar/crear el botón "Reproductor"
+      // ====================================================
+      let btnReproductor = document.getElementById('btnAbrirReproductor');
+      if (!btnReproductor) {
+        btnReproductor = document.createElement('button');
+        btnReproductor.className = 'btn-edit';
+        btnReproductor.id = 'btnAbrirReproductor';
+        btnReproductor.textContent = '🎧 Reproductor';
+        const actionsBar = document.querySelector('.modal-actions-bar');
+        if (actionsBar) {
+          const shareBtn = document.getElementById('btnCompartirFicha');
+          if (shareBtn) {
+            actionsBar.insertBefore(btnReproductor, shareBtn);
+          } else {
+            actionsBar.appendChild(btnReproductor);
+          }
+        }
+      }
+      btnReproductor.addEventListener('click', function() {
+        const lista = getArtistasGuardados(f.id) || [];
+        abrirModalReproductor(f, lista);
+      });
+      btnReproductor.style.display = '';
+      // ====================================================
       } catch(e) {
         estadoEl.style.color = '#b23a2e';
         estadoEl.textContent = '❌ Error al guardar: ' + e.message;
