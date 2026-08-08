@@ -413,7 +413,7 @@ body.dark .btn-quitar-cartel:hover{background:#4d5c54}
 .fp-titlebar .fp-dots span{display:inline-block;width:7px;height:7px;border-radius:50%;background:#8a8570;border:1px solid #4a4638;margin-left:4px}
 .fp-screen{background:#9db89c;background-image:linear-gradient(180deg,#a7c0a5,#8fae8d);border:2px solid #4a5a48;border-radius:2px;padding:6px;box-shadow:inset 0 2px 6px rgba(0,0,0,0.4);margin-bottom:8px;position:relative}
 .fp-video-frame{position:relative;width:100%;height:120px;background:#14200f;border:1px solid #2b3a26;border-radius:2px;overflow:hidden}
-.fp-video-frame iframe{position:absolute;top:50%;left:50%;width:178%;height:178%;transform:translate(-50%,-50%);border:none;pointer-events:none;filter:sepia(70%) saturate(280%) hue-rotate(58deg) brightness(0.85) contrast(1.15)}
+.fp-video-frame iframe{position:absolute;top:50%;left:50%;width:100%;height:100%;transform:translate(-50%,-50%);border:none;pointer-events:none;filter:sepia(70%) saturate(280%) hue-rotate(58deg) brightness(0.85) contrast(1.15)}
 /* Modo limpio (pantalla completa): vídeo original, sin recortes, sin filtros */
 .fp-player.fp-clean .fp-video-frame iframe{width:100%;height:100%;transform:none;top:0;left:0;filter:none;pointer-events:auto}
 .fp-player.fp-clean .fp-video-frame .fp-scan{display:none}
@@ -2234,6 +2234,9 @@ let fpPlaying = false;
 let fpDuration = 0;
 let fpIsSeeking = false;
 let fpListeningInterval = null;
+let fpEndCheckInterval = null;
+let fpLastCurrentTime = 0;
+let fpStuckCounter = 0;
 
 function fpFormatTime(sec){
   if (!isFinite(sec) || sec < 0) sec = 0;
@@ -2402,6 +2405,7 @@ function fpLoadAndPlay(ai, si){
   fpTimeCurrent.textContent = '0:00';
   fpTimeDuration.textContent = '0:00';
   fpYtFrame.src = fpYtEmbedSrc(cancion.id);
+  if (fpEndCheckInterval) { clearInterval(fpEndCheckInterval); fpEndCheckInterval = null; }
   fpStartListening();
   fpUpdateVideoClass();
   // Actualizar barra de título colapsada
@@ -2417,9 +2421,37 @@ function fpLoadAndPlay(ai, si){
 
 function fpStartListening(){
   if (fpListeningInterval) clearInterval(fpListeningInterval);
+  if (fpEndCheckInterval) clearInterval(fpEndCheckInterval);
+  fpLastCurrentTime = 0;
+  fpStuckCounter = 0;
+  // Suscribirse explícitamente a eventos de YouTube
+  setTimeout(() => {
+    fpPostCmd('addEventListener', ['onStateChange']);
+    fpPostCmd('addEventListener', ['onReady']);
+  }, 800);
   fpListeningInterval = setInterval(() => {
     if (!fpYtFrame.contentWindow) return;
     fpYtFrame.contentWindow.postMessage(JSON.stringify({ event:'listening', id:'fpYtFrame' }), '*');
+  }, 400);
+  // Fallback: si el evento onStateChange no llega, detectar fin por tiempo
+  fpEndCheckInterval = setInterval(() => {
+    if (!fpPlaying || fpDuration <= 0) return;
+    const current = parseFloat(fpSeekSlider.value) || 0;
+    // Si estamos a menos de 1.5s del final, forzar siguiente
+    if (current > 0 && fpDuration > 0 && (fpDuration - current) < 1.5) {
+      fpNextTrack();
+      return;
+    }
+    // Detectar si el reproductor se ha "atascado" (mismo tiempo durante 4 segundos)
+    if (Math.abs(current - fpLastCurrentTime) < 0.5) {
+      fpStuckCounter++;
+      if (fpStuckCounter > 10) { // ~4 segundos atascado
+        fpNextTrack();
+      }
+    } else {
+      fpStuckCounter = 0;
+    }
+    fpLastCurrentTime = current;
   }, 400);
 }
 
@@ -2427,7 +2459,31 @@ function fpNextTrack(){
   if (fpCurrentArtistIndex === -1) return;
   const artist = fpArtistData[fpCurrentArtistIndex];
   const nextIdx = fpCurrentSongIndex + 1;
-  if (artist.canciones && nextIdx < artist.canciones.length) fpLoadAndPlay(fpCurrentArtistIndex, nextIdx);
+  // 1) Hay más canciones del mismo artista
+  if (artist.canciones && nextIdx < artist.canciones.length) {
+    fpLoadAndPlay(fpCurrentArtistIndex, nextIdx);
+    return;
+  }
+  // 2) Saltar al siguiente artista
+  const nextArtistIdx = fpCurrentArtistIndex + 1;
+  if (nextArtistIdx < fpArtistData.length) {
+    const nextArtist = fpArtistData[nextArtistIdx];
+    // Si aún no tiene canciones cargadas, las cargamos y luego reproducimos la primera
+    if (!nextArtist.canciones) {
+      toggleFpArtist(nextArtistIdx);
+      // Esperamos a que cargue y reproducimos la primera
+      const checkAndPlay = () => {
+        if (nextArtist.canciones && nextArtist.canciones.length) {
+          fpLoadAndPlay(nextArtistIdx, 0);
+        } else {
+          setTimeout(checkAndPlay, 300);
+        }
+      };
+      setTimeout(checkAndPlay, 500);
+    } else if (nextArtist.canciones.length) {
+      fpLoadAndPlay(nextArtistIdx, 0);
+    }
+  }
 }
 function fpPrevTrack(){
   if (fpCurrentArtistIndex === -1) return;
@@ -2561,6 +2617,7 @@ function fpCerrarReproductor(){
   reproductorModalOverlay.classList.remove('open');
   reproductorModalOverlay.classList.remove('fp-collapsed');
   if (document.fullscreenElement) { document.exitFullscreen().catch(()=>{}); }
+  if (fpEndCheckInterval) { clearInterval(fpEndCheckInterval); fpEndCheckInterval = null; }
   fpModalBoxEl.style.left = '';
   fpModalBoxEl.style.top = '';
   if (fpListeningInterval) clearInterval(fpListeningInterval);
